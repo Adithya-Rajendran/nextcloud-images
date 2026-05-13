@@ -53,7 +53,7 @@ jobs:
           tags: |
             type=raw,value=${{ steps.ver.outputs.version }}-apache
             type=raw,value=pr-${{ github.event.pull_request.number }},enable=${{ github.event_name == 'pull_request' }}
-            type=sha,prefix={{branch}}-
+            type=sha,prefix=sha-
 
       - uses: docker/build-push-action@v5
         with:
@@ -118,6 +118,8 @@ jobs:
         run: |
           docker run --rm "${{ steps.img.outputs.image }}" \
             php -r "include '/usr/src/nextcloud/version.php'; echo \$OC_VersionString . PHP_EOL;"
+      - name: occ runs
+        run: docker run --rm "${{ steps.img.outputs.image }}" php /usr/src/nextcloud/occ --version
 
       - name: End-to-end boot against real Postgres
         run: |

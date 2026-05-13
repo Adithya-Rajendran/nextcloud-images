@@ -9,7 +9,8 @@ FROM nextcloud:${NEXTCLOUD_VERSION}-apache
 #                             PHP-Imagick extension (no PECL rebuild needed)
 # - smbclient               : SMB/CIFS external-storage backend
 
-RUN apt-get update; \
+RUN apt-get update \
+    && apt-get -y dist-upgrade; \
     apt-get install -y --no-install-recommends ffmpeg smbclient; \
     magick_extra=$(apt-cache search --names-only '^libmagickcore-[0-9]+\.q16(hdri)?-[0-9]+(t64)?-extra$' \
                    | awk '{print $1}' | sort -Vr | head -n1); \
