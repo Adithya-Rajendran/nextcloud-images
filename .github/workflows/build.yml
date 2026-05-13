@@ -56,7 +56,7 @@ jobs:
           tags: |
             type=raw,value=${{ steps.ver.outputs.version }}-${{ matrix.variant }}
             type=raw,value=pr-${{ github.event.pull_request.number }},enable=${{ github.event_name == 'pull_request' }}
-            type=sha,prefix={{branch}}-
+            type=sha,prefix=sha-
 
       - uses: docker/build-push-action@v5
         with:
