@@ -10,9 +10,9 @@ FROM nextcloud:${NEXTCLOUD_VERSION}-apache
 # - smbclient               : SMB/CIFS external-storage backend
 
 RUN apt-get update \
-    && apt-get -y dist-upgrade; \
-    apt-get install -y --no-install-recommends ffmpeg smbclient; \
-    magick_extra=$(apt-cache search --names-only '^libmagickcore-[0-9]+\.q16(hdri)?-[0-9]+(t64)?-extra$' \
+    && apt-get -y dist-upgrade \
+    && apt-get install -y --no-install-recommends ffmpeg smbclient \
+    && magick_extra=$(apt-cache search --names-only '^libmagickcore-[0-9]+\.q16(hdri)?-[0-9]+(t64)?-extra$' \
                    | awk '{print $1}' | sort -Vr | head -n1); \
     [ -n "$magick_extra" ] || { echo "no libmagickcore-*-extra package found" >&2; exit 1; }; \
     apt-get install -y --no-install-recommends "$magick_extra"; \
