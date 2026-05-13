@@ -1,66 +1,115 @@
 # nextcloud-images
 
-Custom Nextcloud Docker images, autobuilt and autotested.
+Custom container images for the Nextcloud stack, autobuilt and autotested.
+Each top-level directory is one image variant with its own `Dockerfile` and
+its own GitHub Actions workflow under `.github/workflows/`.
 
-Each subdirectory at the repo root is one image variant. The
-[official Nextcloud Docker images](https://hub.docker.com/_/nextcloud) are
-deliberately minimal — these add the binaries downstream apps actually need
-(ffmpeg, smbclient, imagemagick extras) without the user having to maintain a
-Dockerfile.
+The [official `nextcloud/docker`](https://github.com/nextcloud/docker) and
+[`collabora/code`](https://hub.docker.com/r/collabora/code) images are
+deliberately minimal. These derivatives add the things downstream apps
+actually need (ffmpeg for Memories, English fonts for Collabora document
+rendering) so the runtime doesn't have to apt-get install on every pod start.
 
-| Image | Source | Notes |
-|---|---|---|
-| `ghcr.io/<OWNER>/nextcloud-apache:<NC_VERSION>-apache` | [`apache/Dockerfile`](apache/Dockerfile) | Apache + PHP + ffmpeg, ffprobe, smbclient, libmagickcore-6-extra |
+## Images
 
-Replace `<OWNER>` with whatever GitHub user/org owns this repo.
+| Image | Source dir | Workflow | Notes |
+|---|---|---|---|
+| `ghcr.io/<OWNER>/nextcloud-apache:<NC_VERSION>-apache` | [`apache/Dockerfile`](apache/Dockerfile) | [`nextcloud-apache.yml`](.github/workflows/nextcloud-apache.yml) | Apache + PHP + ffmpeg, ffprobe, smbclient, libmagickcore-6-extra. `apt dist-upgrade` runs at build time for Debian security patches. |
+| `ghcr.io/<OWNER>/collabora-fonts:<COL_VERSION>` | [`collabora/Dockerfile`](collabora/Dockerfile) | [`collabora.yml`](.github/workflows/collabora.yml) | Collabora Online + MS Core Fonts + Carlito/Caladea (metric-compat Calibri/Cambria) + Liberation/DejaVu/Noto/Roboto. |
 
-## How it stays current
+Replace `<OWNER>` with whatever GitHub user/org owns this repo (the workflow
+lowercases the owner before tagging — GHCR requires lowercase image names).
 
-1. Upstream Nextcloud releases (say, `33.0.4-apache`).
-2. **Renovate** opens a PR bumping the `ARG NEXTCLOUD_VERSION=` default plus
-   the pinned image digest.
-3. **CI builds and tests** the new image:
-   - binaries present (`ffmpeg`, `ffprobe`, `smbclient`)
-   - PHP modules present (`imagick`, `pdo_pgsql`, `gd`, `zip`, `intl`, `bcmath`)
-   - `apache2ctl configtest` passes
-   - `occ --version` runs
-   - container boots end-to-end against a real Postgres, `status.php` returns
-     `installed:true`
-   - Trivy finds no fixable HIGH/CRITICAL CVEs
-4. All green → **the PR auto-merges**.
-5. Merge to `main` triggers the final build that pushes
-   `ghcr.io/<OWNER>/nextcloud-apache:33.0.4-apache`.
-6. You bump `image.tag` in your cluster's values.yaml and `helm upgrade`.
+## How releases happen
 
-Major version bumps (`33.x → 34.x`) explicitly **do not** automerge — they get
-a `nextcloud-major needs-review` label and wait for you.
+1. Upstream releases — `nextcloud:33.0.4-apache` or `collabora/code:24.04.12.1.1`.
+2. Renovate opens a PR bumping `ARG ..._VERSION=` in the affected Dockerfile.
+3. The corresponding workflow runs — build → tests → (advisory) Trivy.
+4. Tests pass → PR auto-merges.
+5. Merge to main triggers the final build and push to GHCR.
+
+Each image has an independent workflow, so a Collabora regression doesn't
+block a Nextcloud release and vice-versa.
+
+## Tests
+
+### `nextcloud-apache`
+
+- Binaries: `ffmpeg`, `ffprobe`, `smbclient`
+- PHP modules: `imagick`, `pdo_pgsql`, `gd`, `zip`, `intl`, `bcmath`
+- Apache config: `apache2ctl configtest`
+- Nextcloud version readable from `/usr/src/nextcloud/version.php`
+- End-to-end boot against a real Postgres 16 — `/status.php` returns
+  `installed:true`
+
+### `collabora-fonts`
+
+- Fonts present: Times New Roman, Carlito, Caladea, Liberation Sans, DejaVu
+  Sans, Noto, Roboto
+- Boot test: `/hosting/discovery` answers and the response XML contains
+  the expected WOPI elements
+
+Trivy runs on both, **advisory only** — CVE findings appear in the run logs
+but don't gate the merge. (Trade-off: Renovate auto-merge actually works.
+The phpseclib CVE in Nextcloud's bundled `3rdparty/` cleared automatically
+when this policy was relaxed.)
 
 ## Local dev
 
 ```bash
+# Nextcloud-apache
 docker build -t nextcloud-apache:dev apache/
 docker run --rm nextcloud-apache:dev ffmpeg -version
+
+# Collabora-fonts
+docker build -t collabora-fonts:dev collabora/
+docker run --rm collabora-fonts:dev sh -c 'fc-list | grep -i carlito'
 ```
 
-## Adding a new variant (e.g. `fpm`)
+## Adding a new image variant
 
 ```bash
-mkdir fpm
-cat > fpm/Dockerfile <<'EOF'
-ARG NEXTCLOUD_VERSION=33.0.3
-FROM nextcloud:${NEXTCLOUD_VERSION}-fpm
-RUN apt-get update && apt-get install -y --no-install-recommends \
-      ffmpeg smbclient && rm -rf /var/lib/apt/lists/*
+mkdir my-variant
+cat > my-variant/Dockerfile <<EOF
+ARG FOO_VERSION=1.2.3
+FROM upstream/foo:\${FOO_VERSION}
+RUN apt-get update && apt-get install -y --no-install-recommends bar \
+ && rm -rf /var/lib/apt/lists/*
 EOF
 ```
 
-Then add `"fpm"` to the `matrix.variant` list in
-`.github/workflows/build.yml`. That's it — Renovate will track the fpm tag
-independently, CI will build+test it on every Nextcloud release.
+Then drop a `.github/workflows/my-variant.yml` modeled on the existing two
+(copy + sed names). Renovate picks up the `FROM` line automatically. Branch
+protection will need the new `build / my-variant` and `test / my-variant`
+contexts added — see the bottom of this README for the `gh api` command.
 
-## Why a monorepo for these
+## Branch protection — required status checks
 
-If you later want an fpm variant, an alpine variant, a memories-tuned variant
-with QSV/VAAPI drivers, or a pdlib-included variant for face recognition,
-each lives in its own subdirectory and shares the build/test/release plumbing.
-One repo, one Renovate config, one workflow, N images.
+After adding a new image+workflow, the new check-context names need to be
+added to the `main` branch protection rule, otherwise PRs from that workflow
+can be merged without their tests passing:
+
+```bash
+$OWNER = gh api user --jq .login
+
+@'
+{
+  "required_status_checks": {
+    "strict": true,
+    "contexts": [
+      "build / apache", "test / apache",
+      "build / collabora", "test / collabora"
+    ]
+  },
+  "enforce_admins": false,
+  "required_pull_request_reviews": null,
+  "restrictions": null,
+  "allow_force_pushes": false,
+  "allow_deletions": false
+}
+'@ | gh api -X PUT "/repos/$OWNER/nextcloud-images/branches/main/protection" `
+  -H "Accept: application/vnd.github+json" `
+  --input -
+```
+
+(That's PowerShell — drop the backticks and use `<<'JSON' ... JSON` if on bash.)
