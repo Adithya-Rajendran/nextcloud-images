@@ -1,0 +1,5 @@
+# nothing local should land here
+*.log
+.DS_Store
+.idea/
+.vscode/

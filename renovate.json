@@ -1,0 +1,26 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": ["config:recommended"],
+  "timezone": "America/Los_Angeles",
+  "schedule": ["before 6am on Monday"],
+  "dockerfile": { "pinDigests": true },
+  "packageRules": [
+    {
+      "description": "Auto-merge Nextcloud patch/minor/digest bumps once tests pass.",
+      "matchDatasources": ["docker"],
+      "matchPackageNames": ["nextcloud"],
+      "matchUpdateTypes": ["patch", "minor", "digest"],
+      "automerge": true,
+      "automergeType": "pr",
+      "platformAutomerge": true
+    },
+    {
+      "description": "Nextcloud major bumps are admin-impacting — gate on human review.",
+      "matchDatasources": ["docker"],
+      "matchPackageNames": ["nextcloud"],
+      "matchUpdateTypes": ["major"],
+      "automerge": false,
+      "addLabels": ["nextcloud-major", "needs-review"]
+    }
+  ]
+}
