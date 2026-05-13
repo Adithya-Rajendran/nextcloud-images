@@ -96,7 +96,8 @@ jobs:
           else
             TAG="${DEFAULT}-${{ matrix.variant }}"
           fi
-          IMG="ghcr.io/${{ github.repository_owner }}/nextcloud-${{ matrix.variant }}:$TAG"
+          OWNER=$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
+          IMG="ghcr.io/$OWNER/nextcloud-${{ matrix.variant }}:$TAG"
           echo "image=$IMG" >> "$GITHUB_OUTPUT"
 
       - run: docker pull "${{ steps.img.outputs.image }}"
