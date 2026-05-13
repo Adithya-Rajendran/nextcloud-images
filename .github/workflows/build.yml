@@ -123,7 +123,7 @@ jobs:
         run: docker run --rm "${{ steps.img.outputs.image }}" apache2ctl configtest
 
       - name: occ runs
-        run: docker run --rm "${{ steps.img.outputs.image }}" php /var/www/html/occ --version
+        run: docker run --rm "${{ steps.img.outputs.image }}" php /usr/src/nextcloud/occ --version
 
       - name: End-to-end boot against a real Postgres
         run: |
