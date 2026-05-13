@@ -1,15 +1,17 @@
-name: Build, test, and publish
+name: nextcloud-apache
 
 on:
   push:
     branches: [main]
     paths:
-      - '*/Dockerfile'
-      - '.github/workflows/build.yml'
+      - 'apache/**'
+      - '.github/workflows/nextcloud-apache.yml'
+      - '.trivyignore'
   pull_request:
     paths:
-      - '*/Dockerfile'
-      - '.github/workflows/build.yml'
+      - 'apache/**'
+      - '.github/workflows/nextcloud-apache.yml'
+      - '.trivyignore'
   workflow_dispatch:
     inputs:
       nextcloud_version:
@@ -23,13 +25,8 @@ permissions:
 
 jobs:
   build:
-    name: build / ${{ matrix.variant }}
+    name: build / apache
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        # Add a new variant by creating <name>/Dockerfile and appending here.
-        variant: [apache]
     steps:
       - uses: actions/checkout@v4
 
@@ -44,7 +41,7 @@ jobs:
       - name: Resolve upstream Nextcloud version
         id: ver
         run: |
-          DEFAULT=$(grep -E '^ARG NEXTCLOUD_VERSION=' ${{ matrix.variant }}/Dockerfile | head -1 | cut -d= -f2)
+          DEFAULT=$(grep -E '^ARG NEXTCLOUD_VERSION=' apache/Dockerfile | head -1 | cut -d= -f2)
           VER="${{ inputs.nextcloud_version }}"
           VER="${VER:-$DEFAULT}"
           echo "version=$VER" >> "$GITHUB_OUTPUT"
@@ -52,32 +49,28 @@ jobs:
       - id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ghcr.io/${{ github.repository_owner }}/nextcloud-${{ matrix.variant }}
+          images: ghcr.io/${{ github.repository_owner }}/nextcloud-apache
           tags: |
-            type=raw,value=${{ steps.ver.outputs.version }}-${{ matrix.variant }}
+            type=raw,value=${{ steps.ver.outputs.version }}-apache
             type=raw,value=pr-${{ github.event.pull_request.number }},enable=${{ github.event_name == 'pull_request' }}
             type=sha,prefix=sha-
 
       - uses: docker/build-push-action@v5
         with:
-          context: ${{ matrix.variant }}
+          context: apache
           push: true
           platforms: linux/amd64
           build-args: |
             NEXTCLOUD_VERSION=${{ steps.ver.outputs.version }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha,scope=${{ matrix.variant }}
-          cache-to: type=gha,mode=max,scope=${{ matrix.variant }}
+          cache-from: type=gha,scope=apache
+          cache-to: type=gha,mode=max,scope=apache
 
   test:
-    name: test / ${{ matrix.variant }}
+    name: test / apache
     needs: build
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        variant: [apache]
     steps:
       - uses: actions/checkout@v4
 
@@ -87,17 +80,17 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Resolve image tag we just built
+      - name: Resolve image tag
         id: img
         run: |
-          DEFAULT=$(grep -E '^ARG NEXTCLOUD_VERSION=' ${{ matrix.variant }}/Dockerfile | head -1 | cut -d= -f2)
+          OWNER=$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
+          DEFAULT=$(grep -E '^ARG NEXTCLOUD_VERSION=' apache/Dockerfile | head -1 | cut -d= -f2)
           if [ "${{ github.event_name }}" = "pull_request" ]; then
             TAG="pr-${{ github.event.pull_request.number }}"
           else
-            TAG="${DEFAULT}-${{ matrix.variant }}"
+            TAG="${DEFAULT}-apache"
           fi
-          OWNER=$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
-          IMG="ghcr.io/$OWNER/nextcloud-${{ matrix.variant }}:$TAG"
+          IMG="ghcr.io/$OWNER/nextcloud-apache:$TAG"
           echo "image=$IMG" >> "$GITHUB_OUTPUT"
 
       - run: docker pull "${{ steps.img.outputs.image }}"
@@ -119,13 +112,16 @@ jobs:
           done
 
       - name: Apache configtest
-        if: matrix.variant == 'apache'
         run: docker run --rm "${{ steps.img.outputs.image }}" apache2ctl configtest
 
+      - name: Nextcloud version check
+        run: |
+          docker run --rm "${{ steps.img.outputs.image }}" \
+            php -r "include '/usr/src/nextcloud/version.php'; echo \$OC_VersionString . PHP_EOL;"
       - name: occ runs
         run: docker run --rm "${{ steps.img.outputs.image }}" php /usr/src/nextcloud/occ --version
 
-      - name: End-to-end boot against a real Postgres
+      - name: End-to-end boot against real Postgres
         run: |
           IMG="${{ steps.img.outputs.image }}"
           docker network create nctest
@@ -166,8 +162,8 @@ jobs:
           echo "--- nc ---" && docker logs nc | tail -300 || true
           echo "--- pg ---" && docker logs pg | tail -100 || true
 
-      - name: Trivy scan (HIGH/CRITICAL, fixable only)
-        continue-on-error: true 
+      - name: Trivy scan (HIGH/CRITICAL, fixable only) — advisory
+        continue-on-error: true
         uses: aquasecurity/trivy-action@master
         with:
           image-ref: ${{ steps.img.outputs.image }}
