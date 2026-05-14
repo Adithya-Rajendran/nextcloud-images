@@ -51,7 +51,7 @@ jobs:
         with:
           images: ghcr.io/${{ github.repository_owner }}/nextcloud-fpm
           tags: |
-            type=raw,value=${{ steps.ver.outputs.version }}-fpm,enable=${{ github.event_name != 'pull_request' && github.ref == 'refs/heads/main' }}
+            type=raw,value=${{ steps.ver.outputs.version }}-fpm,enable=${{ github.event_name != 'pull_request' }}
             type=raw,value=pr-${{ github.event.pull_request.number }},enable=${{ github.event_name == 'pull_request' }}
             type=sha,prefix=sha-
 
