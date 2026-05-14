@@ -10,10 +10,12 @@ FROM nextcloud:${NEXTCLOUD_VERSION}-fpm
 # install our extras. The dist-upgrade is what closes Debian-package CVEs
 # without waiting for Nextcloud to rebuild.
 RUN apt-get update \
+ && imagemagickExtra="$(apt-cache search --names-only '^libmagickcore-[0-9]+\.q16(-[0-9]+)?-extra$' | awk '{print $1}' | sort -Vr | head -n1)" \
+ && test -n "$imagemagickExtra" \
  && apt-get -y dist-upgrade \
  && apt-get install -y --no-install-recommends \
       ffmpeg \
-      libmagickcore-6.q16-6-extra \
+      "$imagemagickExtra" \
       smbclient \
  && apt-get clean \
  && rm -rf /var/lib/apt/lists/* /tmp/*

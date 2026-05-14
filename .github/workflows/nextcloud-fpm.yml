@@ -85,10 +85,14 @@ jobs:
         run: |
           OWNER=$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
           DEFAULT=$(grep -E '^ARG NEXTCLOUD_VERSION=' fpm/Dockerfile | head -1 | cut -d= -f2)
+          VERSION="${{ github.event.inputs.nextcloud_version }}"
+          if [ -z "$VERSION" ]; then
+            VERSION="$DEFAULT"
+          fi
           if [ "${{ github.event_name }}" = "pull_request" ]; then
             TAG="pr-${{ github.event.pull_request.number }}"
           else
-            TAG="${DEFAULT}-fpm"
+            TAG="${VERSION}-fpm"
           fi
           IMG="ghcr.io/$OWNER/nextcloud-fpm:$TAG"
           echo "image=$IMG" >> "$GITHUB_OUTPUT"
