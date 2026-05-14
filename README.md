@@ -23,7 +23,7 @@ lowercases the owner before tagging — GHCR requires lowercase image names).
 
 ## How releases happen
 
-1. Upstream releases — `nextcloud:33.0.4-{apache,fpm}` or `collabora/code:24.04.12.1.1`.
+1. Upstream releases — `nextcloud:33.0.4-{apache,fpm}` or `collabora/code:25.04.9.4.1`.
 2. Renovate opens a PR bumping `ARG ..._VERSION=` in the affected Dockerfile.
 3. The corresponding workflow runs — build → tests → (advisory) Trivy.
 4. Tests pass → PR auto-merges.

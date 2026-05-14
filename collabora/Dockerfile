@@ -5,7 +5,7 @@
 #
 # Tag note: Collabora's apt repo's "latest" pointer moves frequently; pin to
 # a specific version below and let Renovate bump it.
-ARG COLLABORA_VERSION=24.04.11.4.1
+ARG COLLABORA_VERSION=25.04.9.4.1
 FROM collabora/code:${COLLABORA_VERSION}
 
 USER root

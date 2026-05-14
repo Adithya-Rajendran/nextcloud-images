@@ -15,7 +15,7 @@ on:
   workflow_dispatch:
     inputs:
       collabora_version:
-        description: "Override upstream Collabora version (e.g. 24.04.11.4.1)"
+        description: "Override upstream Collabora version (e.g. 25.04.9.4.1)"
         required: false
 
 permissions:
