@@ -100,7 +100,7 @@ After adding a new image+workflow, add the new check-context names to the
 `main` branch protection rule:
 
 ```powershell
-$OWNER = gh api user --jq .login
+$OWNER = gh repo view --json owner --jq .owner.login
 
 @'
 {
