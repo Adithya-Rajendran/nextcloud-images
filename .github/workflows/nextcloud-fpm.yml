@@ -1,0 +1,223 @@
+name: nextcloud-fpm
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'fpm/**'
+      - '.github/workflows/nextcloud-fpm.yml'
+      - '.trivyignore'
+  pull_request:
+    paths:
+      - 'fpm/**'
+      - '.github/workflows/nextcloud-fpm.yml'
+      - '.trivyignore'
+  workflow_dispatch:
+    inputs:
+      nextcloud_version:
+        description: "Override upstream Nextcloud version (e.g. 33.0.4)"
+        required: false
+
+permissions:
+  contents: read
+  packages: write
+  pull-requests: write
+
+jobs:
+  build:
+    name: build / fpm
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Resolve upstream Nextcloud version
+        id: ver
+        run: |
+          DEFAULT=$(grep -E '^ARG NEXTCLOUD_VERSION=' fpm/Dockerfile | head -1 | cut -d= -f2)
+          VER="${{ inputs.nextcloud_version }}"
+          VER="${VER:-$DEFAULT}"
+          echo "version=$VER" >> "$GITHUB_OUTPUT"
+
+      - id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository_owner }}/nextcloud-fpm
+          tags: |
+            type=raw,value=${{ steps.ver.outputs.version }}-fpm,enable=${{ github.event_name != 'pull_request' }}
+            type=raw,value=pr-${{ github.event.pull_request.number }},enable=${{ github.event_name == 'pull_request' }}
+            type=sha,prefix=sha-
+
+      - uses: docker/build-push-action@v5
+        with:
+          context: fpm
+          push: true
+          platforms: linux/amd64
+          build-args: |
+            NEXTCLOUD_VERSION=${{ steps.ver.outputs.version }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha,scope=fpm
+          cache-to: type=gha,mode=max,scope=fpm
+
+  test:
+    name: test / fpm
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Resolve image tag
+        id: img
+        run: |
+          OWNER=$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
+          DEFAULT=$(grep -E '^ARG NEXTCLOUD_VERSION=' fpm/Dockerfile | head -1 | cut -d= -f2)
+          VERSION="${{ github.event.inputs.nextcloud_version }}"
+          if [ -z "$VERSION" ]; then
+            VERSION="$DEFAULT"
+          fi
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            TAG="pr-${{ github.event.pull_request.number }}"
+          else
+            TAG="${VERSION}-fpm"
+          fi
+          IMG="ghcr.io/$OWNER/nextcloud-fpm:$TAG"
+          echo "image=$IMG" >> "$GITHUB_OUTPUT"
+
+      - run: docker pull "${{ steps.img.outputs.image }}"
+
+      - name: Binary smoke tests
+        run: |
+          IMG="${{ steps.img.outputs.image }}"
+          docker run --rm "$IMG" ffmpeg  -version | head -1
+          docker run --rm "$IMG" ffprobe -version | head -1
+          docker run --rm "$IMG" smbclient --version
+
+      - name: PHP modules present
+        run: |
+          IMG="${{ steps.img.outputs.image }}"
+          docker run --rm "$IMG" php -m > mods.txt
+          cat mods.txt
+          for mod in imagick pdo_pgsql gd zip intl bcmath; do
+            grep -qi "^$mod$" mods.txt || { echo "::error::missing PHP module: $mod"; exit 1; }
+          done
+
+      - name: php-fpm config syntax
+        run: docker run --rm "${{ steps.img.outputs.image }}" php-fpm -t
+
+      - name: Nextcloud version check (no DB needed)
+        run: |
+          docker run --rm "${{ steps.img.outputs.image }}" \
+            php -r "include '/usr/src/nextcloud/version.php'; echo \$OC_VersionString . PHP_EOL;"
+
+      - name: End-to-end boot — fpm + nginx side-by-side, hit /status.php
+        run: |
+          IMG="${{ steps.img.outputs.image }}"
+          docker network create nctest
+
+          # Postgres
+          docker run -d --name pg --network nctest \
+            -e POSTGRES_PASSWORD=testpw \
+            -e POSTGRES_USER=nextcloud \
+            -e POSTGRES_DB=nextcloud \
+            postgres:16
+          for i in $(seq 1 30); do
+            docker exec pg pg_isready -U nextcloud -d nextcloud >/dev/null 2>&1 && break
+            sleep 2
+          done
+
+          # nextcloud-fpm. Use a NAMED volume so nginx can mount the same webroot
+          # after fpm's entrypoint has copied /usr/src/nextcloud → /var/www/html.
+          docker volume create nc-web
+          docker run -d --name nc --network nctest \
+            -v nc-web:/var/www/html \
+            -e POSTGRES_HOST=pg \
+            -e POSTGRES_PASSWORD=testpw \
+            -e POSTGRES_USER=nextcloud \
+            -e POSTGRES_DB=nextcloud \
+            -e NEXTCLOUD_ADMIN_USER=admin \
+            -e NEXTCLOUD_ADMIN_PASSWORD=testpwtestpwtestpw \
+            -e NEXTCLOUD_TRUSTED_DOMAINS=localhost \
+            "$IMG"
+
+          # Wait for the entrypoint to populate /var/www/html and start fpm.
+          # Looking for the "occ" file is the simplest proxy.
+          for i in $(seq 1 30); do
+            if docker exec nc test -f /var/www/html/occ 2>/dev/null && \
+               docker exec nc php-fpm -t >/dev/null 2>&1; then
+              break
+            fi
+            sleep 5
+          done
+
+          # Minimal nginx config that proxies *.php to fpm
+          cat > /tmp/nginx.conf <<'NGINX'
+          upstream php-handler { server nc:9000; }
+          server {
+            listen 8080;
+            root /var/www/html;
+            index index.php;
+            location ~ ^/status\.php { fastcgi_split_path_info ^(.+\.php)(/.*)$;
+              include fastcgi_params;
+              fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;
+              fastcgi_pass php-handler; }
+          }
+          NGINX
+          docker run -d --name web --network nctest \
+            -p 8080:8080 \
+            -v nc-web:/var/www/html:ro \
+            -v /tmp/nginx.conf:/etc/nginx/conf.d/default.conf:ro \
+            nginx:1.27-alpine
+
+          # Hit status.php through nginx
+          ok=0
+          for i in $(seq 1 40); do
+            sleep 5
+            if curl -sf http://localhost:8080/status.php > /tmp/status.json 2>/dev/null; then
+              ok=1; break
+            fi
+            echo "waiting ($i/40)..."
+          done
+          [ $ok -eq 1 ] || { echo "::error::status.php never returned"; exit 1; }
+          cat /tmp/status.json
+          grep -q '"installed":true' /tmp/status.json
+
+      - name: Container logs on failure
+        if: failure()
+        run: |
+          echo "--- nc (fpm) ---" && docker logs nc | tail -300 || true
+          echo "--- web (nginx) ---" && docker logs web | tail -100 || true
+          echo "--- pg ---" && docker logs pg | tail -100 || true
+
+      - name: Trivy scan (HIGH/CRITICAL, fixable only) — advisory
+        continue-on-error: true
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: ${{ steps.img.outputs.image }}
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: '1'
+          format: table
+
+  automerge:
+    name: automerge / renovate
+    needs: [build, test]
+    if: github.event_name == 'pull_request' && github.actor == 'renovate[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - run: gh pr merge --auto --squash "${{ github.event.pull_request.number }}"
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

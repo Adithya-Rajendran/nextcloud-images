@@ -1,0 +1,32 @@
+# syntax=docker/dockerfile:1
+# Nextcloud PHP-FPM variant. Pairs with a separate web container (typically
+# nginx) that proxies *.php to 127.0.0.1:9000 over loopback.
+#
+# Same extras as the apache variant — only the base image differs.
+ARG NEXTCLOUD_VERSION=33.0.3
+FROM nextcloud:${NEXTCLOUD_VERSION}-fpm
+
+# Pull Debian security updates the upstream image may be lagging on, then
+# install our extras. The dist-upgrade is what closes Debian-package CVEs
+# without waiting for Nextcloud to rebuild.
+RUN apt-get update \
+ && imagemagickExtra="$(apt-cache search --names-only '^libmagickcore-[0-9]+\.q16([a-z-]+)?(-[0-9]+)?(t64)?-extra$' | awk '{print $1}' | sort -Vr | head -n1)" \
+ && if [ -z "$imagemagickExtra" ]; then \
+      echo >&2 "error: failed to detect the Debian ImageMagick extra package (expected a libmagickcore-*.q16*-extra package name)"; \
+      exit 1; \
+    fi \
+ && apt-get -y dist-upgrade \
+ && apt-get install -y --no-install-recommends \
+      ffmpeg \
+      "$imagemagickExtra" \
+      smbclient \
+ && apt-get clean \
+ && rm -rf /var/lib/apt/lists/* /tmp/*
+
+# Build-time smoke test
+RUN ffmpeg  -version >/dev/null \
+ && ffprobe -version >/dev/null \
+ && smbclient --version >/dev/null
+
+# php-fpm.conf in the upstream image already listens on :9000 and runs as
+# www-data; we don't override either.
