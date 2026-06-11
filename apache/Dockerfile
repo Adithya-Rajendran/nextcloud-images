@@ -1,5 +1,5 @@
 # syntax=docker/dockerfile:1
-ARG NEXTCLOUD_VERSION=33.0.3
+ARG NEXTCLOUD_VERSION=33.0.5
 FROM nextcloud:${NEXTCLOUD_VERSION}-apache
 
 # Extras the upstream image deliberately omits to keep the base small.

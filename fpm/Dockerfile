@@ -3,7 +3,7 @@
 # nginx) that proxies *.php to 127.0.0.1:9000 over loopback.
 #
 # Same extras as the apache variant — only the base image differs.
-ARG NEXTCLOUD_VERSION=33.0.3
+ARG NEXTCLOUD_VERSION=33.0.5
 FROM nextcloud:${NEXTCLOUD_VERSION}-fpm
 
 # Pull Debian security updates the upstream image may be lagging on, then
